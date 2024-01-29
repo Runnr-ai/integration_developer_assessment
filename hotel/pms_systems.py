@@ -13,8 +13,8 @@ from hotel.external_api import (
     APIError,
 )
 
-from hotel.models import Stay, Guest, Hotel, Language
-from hotel.utils import validate_phone_number, LANGUAGE_MAPPINGS, STATUS_MAPPINGS
+from hotel.models import Stay, Guest
+from hotel.utils import fetch_or_create_guest, update_or_create_stay
 
 
 class PMS(ABC):
@@ -87,6 +87,11 @@ class PMS_Mews(PMS):
             raise Exception("Invalid request body!")
 
     def handle_webhook(self, webhook_data: dict) -> bool:
+        # Guests and Stays lists are used for bulk_create
+        guests = []
+        stays = []
+        phones = []
+
         for event in webhook_data.get("Events"):
             # Extracting reservation_id from the payload and reservation_details from the mock API
             reservation_id = event.get("Value").get("ReservationId")
@@ -96,70 +101,59 @@ class PMS_Mews(PMS):
             guest_id = reservation_details.get("GuestId")
             guest_details = json.loads(get_guest_details(guest_id))
 
-            # Extracting phone_number, country and status from the mock API
-            phone_number = guest_details.get("Phone")
-            country = guest_details.get("Country")
-            status = reservation_details.get("Status")
-
-            try:
-                # Performing a check for the guest in the DB
-                guest = Guest.objects.get(phone=phone_number)
-            except Guest.DoesNotExist:
-                # Performing name validation
-                if not guest_details.get("Name"):
-                    raise Exception("Please enter a valid name!")
-
-                # Performing a phone number validation (using phonenumbers library)
-                if not validate_phone_number(phone_number):
-                    raise Exception("Please enter a valid phone number!")
+            guest = fetch_or_create_guest(guest_details, phones)
+            guests.append(guest)
                 
-                # Performing country validation
-                if not country:
-                    raise Exception("Please enter a valid country!")
+            stay = update_or_create_stay(reservation_details, guest)
+            stays.append(stay)
 
-                # Saving the guest in the DB after validation passed
-                guest = Guest(
-                    name = guest_details.get("Name"),
-                    phone = phone_number,
-                    language = LANGUAGE_MAPPINGS.get(country)
-                )
-                guest.save()
-                
-            try:
-                # Try to grab and update the Stay if it exists in the DB
-                stay_object = Stay.objects.get(pms_reservation_id=reservation_id)
-                stay_object.guest = guest
-                stay_object.status = STATUS_MAPPINGS.get(status)
-                stay_object.checkin = datetime.strptime(
-                    reservation_details.get("CheckInDate"), "%Y-%m-%d"
-                    ),
-                stay_object.checkout = datetime.strptime(
-                    reservation_details.get("CheckOutDate"), "%Y-%m-%d"
-                    )
-            except Stay.DoesNotExist:
-                # Saving the stay in the DB, since it doesn't already exist
-                stay_object = Stay(
-                    hotel = Hotel.objects.filter(
-                        pms_hotel_id=reservation_details.get("HotelId")
-                        ).first(),
-                    guest = guest,
-                    pms_reservation_id = reservation_id,
-                    pms_guest_id = guest_id,
-                    status = STATUS_MAPPINGS.get(status),
-                    checkin = reservation_details.get("CheckInDate"),
-                    checkout = reservation_details.get("CheckOutDate")
-                )
-                stay_object.save()
+        # Bulk_create to minimize the calls made to the DB
+        try:
+            Guest.objects.bulk_create(guests)
+            Stay.objects.bulk_create(stays)
+        except:
+            raise Exception("Error occurred while persisting to DB!")
 
         return True
 
     def update_tomorrows_stays(self) -> bool:
-        # TODO: Implement the method
+        # Guests and Stays lists are used for bulk_create
+        guests = []
+        stays = []
+        phones = []
+
+        # Running with checkin and checkout as today because the function will be run at 00:00
+        stays_to_update = json.loads(get_reservations_between_dates(datetime.date.today(), datetime.date.today()))
+        for stay_object in stays_to_update:
+            if stay_object.get("CheckInDate") == datetime.date.today():
+                status = Stay.Status.INSTAY.value
+            if stay_object.get("CheckOutDate") == datetime.date.today():
+                status = Stay.Status.AFTER.value
+            stay_object[status] = status
+
+            #Try to fetch guest if it exists in the DB
+            try:
+                guest_object = Stay.objects.get(pms_reservation_id=stay_object.get("ReservationId")).guest
+            except Stay.DoesNotExist:
+                guest_object = json.loads(get_guest_details(stay_object.get("GuestId")))
+
+            guest = fetch_or_create_guest(guest_object, phones)
+            guests.append(guest)
+
+            stay = update_or_create_stay(stay_object, guest)
+            stays.append(stay)
+        
+        # Bulk_create to minimize the calls made to the DB
+        try:
+            Guest.objects.bulk_create(guests)
+            Stay.objects.bulk_create(stays)
+        except:
+            raise Exception("Error occurred while persisting to DB!")
+
         return True
 
     def stay_has_breakfast(self, stay: Stay) -> Optional[bool]:
-        # TODO: Implement the method
-        return None
+        return json.loads(get_reservation_details(stay.pms_reservation_id)).get("BreakfastIncluded")
 
 
 def get_pms(name):
