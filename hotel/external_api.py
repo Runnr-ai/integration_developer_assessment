@@ -117,14 +117,19 @@ def get_guest_details(guest_id: str) -> str:
     ]
 
     # Phonenumbers library only recognized 2 numbers as valid on the old phones list
+    # Added more valid phone numbers, to increase the chance of successful mock API calls
     phones = [
         "+442071234567",
         None,
         "+61491570156",
         "Not available",
         "+38977690399",
-        ""
+        "",
+        "+4915216567676",
+        "+4915211231234",
+        "+4915214564567",
     ]
+
     # phones = [
     #     "+491234567890",
     #     "123",
