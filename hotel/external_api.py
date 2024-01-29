@@ -115,18 +115,28 @@ def get_guest_details(guest_id: str) -> str:
         "Alice",
         None,
     ]
+
+    # Phonenumbers library only recognized 2 numbers as valid on the old phones list
     phones = [
-        "+491234567890",
-        "123",
-        "0123456789",
         "+442071234567",
-        "Not available",
-        "+16041234567",
-        "",
-        "+8612345678901",
         None,
         "+61491570156",
+        "Not available",
+        "+38977690399",
+        ""
     ]
+    # phones = [
+    #     "+491234567890",
+    #     "123",
+    #     "0123456789",
+    #     "+442071234567",
+    #     "Not available",
+    #     "+16041234567",
+    #     "",
+    #     "+8612345678901",
+    #     None,
+    #     "+61491570156",
+    # ]
 
     return json.dumps(
         {
