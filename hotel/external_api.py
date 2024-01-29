@@ -2,6 +2,7 @@ import json
 import random
 import uuid
 import datetime
+from retry import retry
 
 """
 This document simulates the external API that our system uses to communicate with the
@@ -24,6 +25,7 @@ reservation_statuses = [
 ]
 
 
+@retry(APIError, delay=5, tries=5)
 def get_reservations_between_dates(checkin_date: str, checkout_date: str) -> str:
     """
     Returns the reservations between the given checkin and checkout dates.
@@ -62,6 +64,7 @@ def get_reservations_between_dates(checkin_date: str, checkout_date: str) -> str
     )
 
 
+@retry(APIError, delay=5, tries=5)
 def get_reservation_details(reservation_id: str) -> str:
     """
     Returns the reservation details for any given reservation ID.
@@ -92,6 +95,7 @@ def get_reservation_details(reservation_id: str) -> str:
     )
 
 
+@retry(APIError, delay=5, tries=5)
 def get_guest_details(guest_id: str) -> str:
     """
     Returns the guest details for any given guest ID.
