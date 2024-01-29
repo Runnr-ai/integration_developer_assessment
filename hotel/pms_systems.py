@@ -1,7 +1,9 @@
 from abc import ABC, abstractmethod
 import inspect
+import json
 import sys
 
+from datetime import datetime
 from typing import Optional
 
 from hotel.external_api import (
@@ -11,7 +13,8 @@ from hotel.external_api import (
     APIError,
 )
 
-from hotel.models import Stay, Guest, Hotel
+from hotel.models import Stay, Guest, Hotel, Language
+from hotel.utils import validate_phone_number, LANGUAGE_MAPPINGS, STATUS_MAPPINGS
 
 
 class PMS(ABC):
@@ -78,11 +81,76 @@ class PMS(ABC):
 
 class PMS_Mews(PMS):
     def clean_webhook_payload(self, payload: str) -> dict:
-        # TODO: Implement the method
-        return {}
+        try:
+            return json.loads(payload)
+        except:
+            raise Exception("Invalid request body!")
 
     def handle_webhook(self, webhook_data: dict) -> bool:
-        # TODO: Implement the method
+        for event in webhook_data.get("Events"):
+            # Extracting reservation_id from the payload and reservation_details from the mock API
+            reservation_id = event.get("Value").get("ReservationId")
+            reservation_details = json.loads(get_reservation_details(reservation_id))
+
+            # Extracting guest_id from the payload and guest_details from the mock API
+            guest_id = reservation_details.get("GuestId")
+            guest_details = json.loads(get_guest_details(guest_id))
+
+            # Extracting phone_number, country and status from the mock API
+            phone_number = guest_details.get("Phone")
+            country = guest_details.get("Country")
+            status = reservation_details.get("Status")
+
+            try:
+                # Performing a check for the guest in the DB
+                guest = Guest.objects.get(phone=phone_number)
+            except Guest.DoesNotExist:
+                # Performing name validation
+                if not guest_details.get("Name"):
+                    raise Exception("Please enter a valid name!")
+
+                # Performing a phone number validation (using phonenumbers library)
+                if not validate_phone_number(phone_number):
+                    raise Exception("Please enter a valid phone number!")
+                
+                # Performing country validation
+                if not country:
+                    raise Exception("Please enter a valid country!")
+
+                # Saving the guest in the DB after validation passed
+                guest = Guest(
+                    name = guest_details.get("Name"),
+                    phone = phone_number,
+                    language = LANGUAGE_MAPPINGS.get(country)
+                )
+                guest.save()
+                
+            try:
+                # Try to grab and update the Stay if it exists in the DB
+                stay_object = Stay.objects.get(pms_reservation_id=reservation_id)
+                stay_object.guest = guest
+                stay_object.status = STATUS_MAPPINGS.get(status)
+                stay_object.checkin = datetime.strptime(
+                    reservation_details.get("CheckInDate"), "%Y-%m-%d"
+                    ),
+                stay_object.checkout = datetime.strptime(
+                    reservation_details.get("CheckOutDate"), "%Y-%m-%d"
+                    )
+            except Stay.DoesNotExist:
+                # Saving the stay in the DB, since it doesn't already exist
+                stay_object = Stay(
+                    hotel = Hotel.objects.filter(
+                        pms_hotel_id=reservation_details.get("HotelId")
+                        ).first(),
+                    guest = guest,
+                    pms_reservation_id = reservation_id,
+                    pms_guest_id = guest_id,
+                    status = STATUS_MAPPINGS.get(status),
+                    checkin = reservation_details.get("CheckInDate"),
+                    checkout = reservation_details.get("CheckOutDate")
+                )
+                stay_object.save()
+
         return True
 
     def update_tomorrows_stays(self) -> bool:
